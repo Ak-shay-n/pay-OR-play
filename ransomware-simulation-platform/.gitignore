@@ -1,0 +1,157 @@
+# Environment & Secrets 
+.env
+.env.*
+.env.local
+.env.development
+.env.development.local
+.env.production
+.env.production.local
+.env.test
+.env.test.local
+*.secret
+*.secrets
+secrets/
+credentials/
+config/local.py
+config/secrets.py
+config/production.py
+
+# API Keys & Tokens 
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.csr
+*.jks
+*.keystore
+*.asc
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.ppk
+auth_token.txt
+token.txt
+api_key.txt
+
+# Flask / Backend 
+instance/
+flask_session/
+*.sqlite
+*.sqlite3
+*.db
+simulation-engine/sandbox/
+sandbox/
+simulation_data/
+sessions/
+
+# Python 
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+MANIFEST
+
+# Virtual Environments 
+venv/
+.venv/
+env/
+.env/
+ENV/
+env.bak/
+venv.bak/
+Pipfile.lock
+poetry.lock
+
+# Node / Frontend 
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+.npm
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.pnp.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs 
+*.log
+logs/
+*.log.*
+pip-log.txt
+pip-delete-this-directory.txt
+
+# OS / System Files 
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# IDE / Editor 
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# Coverage & Testing 
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+*.cover
+coverage.xml
+nosetests.xml
+test-results/
+
+# simulation Artefacts (generated per-run)
+# Encrypted demo files
+*.demo_locked
+RANSOM_NOTE_SIMULATION.txt
+
+# Session snapshots / exports
+session_export_*.json
+simulation_*.json
+attack_log_*.txt
+
+# temporary Files 
+*.tmp
+*.temp
+*.bak
+*.swp
+*.orig
+.cache/
+tmp/
+temp/
