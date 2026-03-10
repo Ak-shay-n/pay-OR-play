@@ -6,12 +6,6 @@ import type { SimEvent, DetectionAlert, Session, MonitoringData } from "@/types"
 
 const SERVER_URL = "http://localhost:5000";
 
-interface CommandResult {
-  status: string;
-  message?: string;
-  [key: string]: unknown;
-}
-
 export function useSocket() {
   const socketRef = useRef<Socket | null>(null);
 
@@ -28,6 +22,21 @@ export function useSocket() {
     setConsoleOutput((prev) => [...prev.slice(-499), line]);
   }, []);
 
+  // Fetch all sessions via REST and merge into state
+  const fetchSessions = useCallback(async () => {
+    try {
+      const res = await fetch(`${SERVER_URL}/api/sessions`);
+      const data: { sessions: Session[] } = await res.json();
+      setSessions((prev) => {
+        const merged = [...prev];
+        for (const s of data.sessions) {
+          if (!merged.some((m) => m.id === s.id)) merged.push(s);
+        }
+        return merged;
+      });
+    } catch { /* ignore on startup */ }
+  }, []);
+
   useEffect(() => {
     const socket = io(SERVER_URL, {
       transports: ["polling", "websocket"],
@@ -39,7 +48,7 @@ export function useSocket() {
     socket.on("connect", () => {
       setConnected(true);
       addConsole("[ CONNECTED ] Socket established → " + SERVER_URL);
-      socket.emit("get_sessions");
+      fetchSessions();
     });
 
     socket.on("disconnect", () => {
@@ -60,14 +69,14 @@ export function useSocket() {
       setMonitoring(data);
     });
 
-    socket.on("session_created", (data: { session: Session }) => {
-      const session = data.session;
+    // Backend emits session object directly (not wrapped in {session: ...})
+    socket.on("session_created", (data: Session) => {
       setSessions((prev) =>
-        prev.some((s) => s.id === session.id) ? prev : [...prev, session]
+        prev.some((s) => s.id === data.id) ? prev : [...prev, data]
       );
-      setActiveSession(session);
-      addConsole(`[ SESSION ] Created → ${session.id}`);
-      addConsole(`[ TARGET  ] ${session.target.hostname} (${session.target.ip}) | ${session.target.os}`);
+      setActiveSession(data);
+      addConsole(`[ SESSION ] Created → ${data.id}`);
+      addConsole(`[ TARGET  ] ${data.target.hostname} (${data.target.ip}) | ${data.target.os}`);
     });
 
     socket.on("stage_started", (data: { stage: string; session_id: string }) => {
@@ -85,13 +94,12 @@ export function useSocket() {
       );
     });
 
+    // stage_complete: backend sends {session_id, stage} only
     socket.on(
       "stage_complete",
-      (data: { stage: string; session_id: string; status: string; summary?: string }) => {
+      (data: { stage: string; session_id: string }) => {
         setIsRunning(false);
-        addConsole(
-          `[ DONE    ] ${data.stage} → ${data.status}${data.summary ? " | " + data.summary : ""}`
-        );
+        addConsole(`[ DONE    ] ${data.stage} completed`);
         setSessions((prev) =>
           prev.map((s) =>
             s.id === data.session_id
@@ -131,8 +139,9 @@ export function useSocket() {
       });
     });
 
-    socket.on("help", (data: { commands: string }) => {
-      addConsole(data.commands);
+    // help: backend sends {commands: string[]} — one line per entry
+    socket.on("help", (data: { commands: string[] }) => {
+      data.commands.forEach((line) => addConsole(line));
     });
 
     socket.on("error", (data: { message: string }) => {
@@ -144,22 +153,27 @@ export function useSocket() {
       setConsoleOutput([]);
     });
 
-    socket.on("status", (data: { status: string; session_id?: string; current_stage?: string }) => {
-      addConsole(`[ STATUS  ] ${data.status}${data.current_stage ? " | stage: " + data.current_stage : ""}`);
+    // status: backend emits the full session object directly
+    socket.on("status", (data: Session) => {
+      if (data?.id) {
+        addConsole(`[ STATUS  ] ${data.id} | stage: ${data.current_stage ?? "none"} | ${data.status}`);
+        setActiveSession((prev) => (prev?.id === data.id ? data : prev));
+        setSessions((prev) => prev.map((s) => (s.id === data.id ? data : s)));
+      }
     });
 
     return () => {
       socket.disconnect();
     };
-  }, [addConsole]);
+  }, [addConsole, fetchSessions]);
 
   /* ── REST helpers ─────────────────────────────────── */
 
   const createSession = useCallback(async (): Promise<Session | null> => {
     try {
-      const res = await fetch(`${SERVER_URL}/api/session/create`, { method: "POST" });
-      const data: { session: Session } = await res.json();
-      const session = data.session;
+      // POST /api/sessions — backend returns session object directly (201)
+      const res = await fetch(`${SERVER_URL}/api/sessions`, { method: "POST" });
+      const session: Session = await res.json();
       setSessions((prev) =>
         prev.some((s) => s.id === session.id) ? prev : [...prev, session]
       );
@@ -176,13 +190,14 @@ export function useSocket() {
   const fetchSession = useCallback(
     async (sessionId: string): Promise<Session | null> => {
       try {
-        const res = await fetch(`${SERVER_URL}/api/session/${sessionId}`);
-        const data: { session: Session } = await res.json();
-        setActiveSession(data.session);
+        // GET /api/sessions/<id> — backend returns session object directly
+        const res = await fetch(`${SERVER_URL}/api/sessions/${sessionId}`);
+        const session: Session = await res.json();
+        setActiveSession(session);
         setSessions((prev) =>
-          prev.map((s) => (s.id === data.session.id ? data.session : s))
+          prev.map((s) => (s.id === session.id ? session : s))
         );
-        return data.session;
+        return session;
       } catch {
         return null;
       }
@@ -191,31 +206,36 @@ export function useSocket() {
   );
 
   const runStage = useCallback(
-    async (sessionId: string, stage: string): Promise<CommandResult | null> => {
+    async (sessionId: string, stage: string): Promise<unknown> => {
       try {
-        const res = await fetch(`${SERVER_URL}/api/simulate/${stage}`, {
+        setIsRunning(true);
+        addConsole(`[ STAGE   ] Starting: ${stage}`);
+        // POST /api/sessions/<id>/run/<stage> — no body needed
+        const res = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/run/${stage}`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId }),
         });
         return await res.json();
       } catch (e) {
         addConsole(`[ ERROR   ] Failed to run stage: ${String(e)}`);
+        setIsRunning(false);
         return null;
       }
     },
     [addConsole]
   );
 
-  const restoreSandbox = useCallback(async (): Promise<void> => {
+  const restoreSandbox = useCallback(async (sessionId?: string): Promise<void> => {
+    const id = sessionId ?? activeSession?.id;
+    if (!id) { addConsole("[ ERROR   ] No active session to restore."); return; }
     try {
-      const res = await fetch(`${SERVER_URL}/api/session/restore`, { method: "POST" });
-      const data: CommandResult = await res.json();
-      addConsole(`[ RESTORE ] ${data.message ?? "Sandbox restored"}`);
+      // POST /api/sessions/<id>/restore
+      const res = await fetch(`${SERVER_URL}/api/sessions/${id}/restore`, { method: "POST" });
+      const data: { status?: string } = await res.json();
+      addConsole(`[ RESTORE ] ${data.status ?? "Sandbox restored"}`);
     } catch (e) {
       addConsole(`[ ERROR   ] Restore failed: ${String(e)}`);
     }
-  }, [addConsole]);
+  }, [addConsole, activeSession]);
 
   const clearEvents = useCallback(() => setEvents([]), []);
   const clearAlerts = useCallback(() => setAlerts([]), []);
@@ -232,31 +252,40 @@ export function useSocket() {
 
       switch (verb.toLowerCase()) {
         case "create":
-          socketRef.current.emit("create_session");
+          createSession();
           break;
         case "run": {
           const [stage, sessId] = args;
           if (!stage) { addConsole("Usage: run <stage> [session_id]"); return; }
-          socketRef.current.emit("run_stage", {
-            stage,
-            session_id: sessId ?? activeSession?.id,
-          });
+          const sid = sessId ?? activeSession?.id;
+          if (!sid) { addConsole("[ ERROR   ] No active session. Run 'create' first."); return; }
+          if (stage === "restore_sandbox" || stage === "restore") {
+            restoreSandbox(sid);
+          } else {
+            runStage(sid, stage);
+          }
           break;
         }
         case "status":
-          socketRef.current.emit("get_status", { session_id: args[0] ?? activeSession?.id });
+          socketRef.current.emit("run_command", {
+            command: "status",
+            session_id: args[0] ?? activeSession?.id,
+          });
           break;
         case "restore":
-          restoreSandbox();
+          restoreSandbox(activeSession?.id);
           break;
         case "clear":
           setConsoleOutput([]);
           break;
         case "help":
-          socketRef.current.emit("help");
+          socketRef.current.emit("run_command", { command: "help" });
           break;
         case "sessions":
-          socketRef.current.emit("get_sessions");
+          socketRef.current.emit("run_command", {
+            command: "sessions",
+            session_id: activeSession?.id,
+          });
           break;
         case "use":
           if (args[0]) {
@@ -270,10 +299,14 @@ export function useSocket() {
           }
           break;
         default:
-          socketRef.current.emit("command", { command: cmd });
+          // Pass through as a raw run_command
+          socketRef.current.emit("run_command", {
+            command: cmd,
+            session_id: activeSession?.id,
+          });
       }
     },
-    [connected, activeSession, sessions, addConsole, restoreSandbox]
+    [connected, activeSession, sessions, addConsole, createSession, runStage, restoreSandbox]
   );
 
   return {
